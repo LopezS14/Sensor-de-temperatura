@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Datos del Sensor en Tiempo Real</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        /* Para centrar el canvas de clusters y tamaño máximo */
+        #clusterChart {
+            max-width: 700px;
+            margin: 20px auto;
+            display: block;
+        }
+        /* Estilo para el contenedor del JSON */
+        #jsonDataContainer {
+            white-space: pre-wrap; 
+            background: #f8f9fa; 
+            border: 1px solid #ced4da; 
+            padding: 10px; 
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 10px;
+            display: none; /* Oculto por defecto */
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">Monitoreo en Tiempo Real</h1>
+        <!-- Gráficos -->
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Historial de Temperatura</h5>
+                        <canvas id="tempChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Historial de Humedad</h5>
+                        <canvas id="humChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- NUEVO: Gráfico de Clustering -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Clustering de Temperatura y Humedad</h5>
+                        <canvas id="clusterChart"></canvas>
+                        <button id="toggleJsonBtn" class="btn btn-secondary mt-3">Mostrar datos JSON del clustering</button>
+                        <div id="jsonDataContainer"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+
+    <script>
+        // --- Código original para gráficos de temperatura y humedad ---
+        const socket = io();
+
+        const tempCtx = document.getElementById('tempChart').getContext('2d');
+        const humCtx = document.getElementById('humChart').getContext('2d');
+
+        const tempChart = new Chart(tempCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Temperatura (°C)',
+                    data: [],
+                    borderColor: 'rgb(75, 192, 192)',
+                    tension: 0.1
+                }]
+            }
+        });
+
+        const humChart = new Chart(humCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Humedad (%)',
+                    data: [],
+                    borderColor: 'rgb(54, 162, 235)',
+                    tension: 0.1
+                }]
+            }
+        });
+
+        socket.on('mqtt_message', function(data) {
+            tempChart.data.labels.push(time);
+            tempChart.data.datasets[0].data.push(data.temperatura);
+            
+            humChart.data.labels.push(time);
+            humChart.data.datasets[0].data.push(data.humidity);
+
+            if (tempChart.data.labels.length > 20) {
+                tempChart.data.labels.shift();
+                tempChart.data.datasets[0].data.shift();
+                humChart.data.labels.shift();
+                humChart.data.datasets[0].data.shift();
+            }
+
+            tempChart.update();
+            humChart.update();
+        });
+
+        socket.on('connect', () => {
+            socket.emit('load_history', 20);
+        });
+
+        socket.on('history_data', function(data) {
+            tempChart.data.labels = [];
+            tempChart.data.datasets[0].data = [];
+            humChart.data.labels = [];
+            humChart.data.datasets[0].data = [];
+
+            data.forEach(point => {
+                const time = new Date(point.timestamp).toLocaleTimeString();
+                
+                tempChart.data.labels.push(time);
+                tempChart.data.datasets[0].data.push(point.temperatura);
+                
+                humChart.data.labels.push(time);
+                humChart.data.datasets[0].data.push(point.humidity);
+            });
+
+            tempChart.update();
+            humChart.update();
+        });
+
+
+        // clustering 
+        const clusterCtx = document.getElementById('clusterChart').getContext('2d');
+        let clusterChart;
+
+        // Función para traer datos de clustering desde /ver_clustering
+        async function fetchClusteringData() {
+            try {
+                const response = await fetch('/ver_clustering');
+                const data = await response.json();
+                if (data.error) {
+                    alert(data.error);
+                    return null;
+                }
+                return data;
+            } catch (error) {
+                console.error('Error al obtener datos de clustering:', error);
+                return null;
+            }
+        }
+
+        // Función para asignar color según cluster
+        function getColorByCluster(cluster) {
+            const colors = ['red', 'blue', 'green', 'orange', 'purple', 'cyan'];
+            return colors[cluster] || 'gray';
+        }
+
+        async function renderClusterChart() {
+            const data = await fetchClusteringData();
+            if (!data) return;
+
+            // Guardar JSON en contenedor oculto para mostrar al usuario
+            document.getElementById('jsonDataContainer').textContent = JSON.stringify(data, null, 2);
+
+            const clusters = {};
+
+            data.forEach(point => {
+                if (!clusters[point.cluster]) {
+                    clusters[point.cluster] = [];
+                }
+                clusters[point.cluster].push({
+                    x: point.temperatura,
+                    y: point.humedad
+                });
+            });
+
+            const datasets = [];
+            for (const cluster in clusters) {
+                datasets.push({
+                    label: 'Cluster ' + cluster,
+                    data: clusters[cluster],
+                    backgroundColor: getColorByCluster(cluster)
+                });
+            }
+
+            if (clusterChart) {
+                clusterChart.destroy();
+            }
+
+            clusterChart = new Chart(clusterCtx, {
+                type: 'scatter',
+                data: { datasets: datasets },
+                options: {
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: {
+                                display: true,
+                                text: 'Temperatura (°C)'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Humedad (%)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Inicializar el gráfico de clustering al cargar
+        renderClusterChart();
+        // Refrescar el gráfico automáticamente cada 30 segundos (30000 ms)
+        setInterval(renderClusterChart, 30000);
+
+        // Botón para mostrar/ocultar JSON
+        const toggleJsonBtn = document.getElementById('toggleJsonBtn');
+        const jsonDataContainer = document.getElementById('jsonDataContainer');
+
+        toggleJsonBtn.addEventListener('click', () => {
+            if (jsonDataContainer.style.display === 'none') {
+                jsonDataContainer.style.display = 'block';
+                toggleJsonBtn.textContent = 'Ocultar datos JSON del clustering';
+            } else {
+                jsonDataContainer.style.display = 'none';
+                toggleJsonBtn.textContent = 'Mostrar datos JSON del clustering';
+            }
+        });
+
+        // Opcional: refrescar el clustering cada cierto tiempo (ej. 30 seg)
+        // setInterval(renderClusterChart, 30000);
+
+    </script>
+</body>
+</html>

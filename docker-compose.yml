@@ -1,0 +1,13 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.19.0-pg14
+    container_name: timescaledb
+    environment:
+      POSTGRES_USER: Deyita
+      POSTGRES_PASSWORD: D356106
+      POSTGRES_DB: sensor_data
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data:/var/lib/postgresql/data
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
